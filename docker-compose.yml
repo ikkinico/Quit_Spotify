@@ -1,0 +1,80 @@
+services:
+
+  # ---------------------------------------------------------------------------
+  # Tailscale : la porte d'entrée.
+  # ---------------------------------------------------------------------------
+  tailscale:
+    image: tailscale/tailscale:v1.102.3
+    hostname: ${TS_HOSTNAME}
+    environment:
+      - TS_EXTRA_ARGS=--advertise-tags=tag:server
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SOCKET=/var/run/tailscale/tailscaled.sock
+      - TS_AUTHKEY=${TS_AUTHKEY}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - tailscale-socket:/var/run/tailscale
+      - /dev/net/tun:/dev/net/tun
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    network_mode: host
+
+  docktail:
+    image: ghcr.io/marvinvr/docktail:1.7.9
+    depends_on:
+      - tailscale
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - tailscale-socket:/var/run/tailscale
+    environment:
+      - TAILSCALE_OAUTH_CLIENT_ID=${TAILSCALE_OAUTH_CLIENT_ID}
+      - TAILSCALE_OAUTH_CLIENT_SECRET=${TAILSCALE_OAUTH_CLIENT_SECRET}
+
+  # ---------------------------------------------------------------------------
+  # Navidrome : serveur de musique compatible OpenSubsonic
+  # ---------------------------------------------------------------------------
+  navidrome:
+    image: deluan/navidrome:latest
+    container_name: navidrome
+    depends_on:
+      - docktail
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+    volumes:
+      - ./data/navidrome:/data
+      - ${MUSIC_DIR:-./media/music}:/music:ro
+    labels:
+      - docktail.service.enable=true
+      - docktail.service.name=navidrome
+      - docktail.service.port=4533
+      - docktail.service.service-port=443
+
+  # ---------------------------------------------------------------------------
+  # Audiobookshelf : livres audio (et podcasts si vous y tenez)
+  # ---------------------------------------------------------------------------
+  audiobookshelf:
+    image: ghcr.io/advplyr/audiobookshelf:latest
+    container_name: audiobookshelf
+    depends_on:
+      - docktail
+    environment:
+      TZ: ${TZ:-Europe/Paris}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
+    volumes:
+      - ${AUDIOBOOKS_DIR:-./media/audiobooks}:/audiobooks
+      - ${PODCASTS_DIR:-./media/podcasts}:/podcasts
+      - ./data/audiobookshelf/config:/config
+      - ./data/audiobookshelf/metadata:/metadata
+    labels:
+      - docktail.service.enable=true
+      - docktail.service.name=audiobookshelf
+      - docktail.service.port=80
+      - docktail.service.service-port=443
+
+
+volumes:
+  tailscale-state:
+  tailscale-socket:
